@@ -1,0 +1,223 @@
+
+--- 
+title: "Clean Data"
+author: "chadNoliver"
+date: "2019.07.20"
+output:
+  html_document:
+    df_print: paged
+deadline2: 2019.08.28
+deadline1: 2019.07.29
+--- 
+
+##importing the data files
+
+The excel files (and derived .Rdata file) will not be within this project's git, as it contains data that belongs to CYPB and Juvenile Justice Taskforce.  The file is an export from ```iJes```.
+
+An older file was retrieved by CYPB from the Juvenile Justice Taskforce on 2019.07.18.  I received this file and was given a brief description of its contents with CYPB on 2019.07.19. I began analysis on 2019.07.20.  Data analysis stopped on 2019.07.?? when we realized that the file was incomplete for data analysis due to the fact that it didn't contain a juvenile unique identifier.  On 2019.08.21 we acquired the new files and reconvened.  Now we are working with 2 data files.
+
+
+```{r, import, comment=FALSE, message=FALSE}
+
+
+library(magrittr) 
+library(readxl)  
+library(knitr)
+library(openxlsx)
+library(tidyverse)
+
+arrest <- read_excel("private/Intake Original_All 18 months ready for pivot.xlsm", sheet="All 18 months ready for pivot", guess_max=5000)
+
+intake <- read_excel("private/IntakeActivity 18 month_copy 1.xls", sheet="IntakeActivity 18 month ", guess_max=5000)
+#`r library(magrittr) nrow(intake %>% filter(is.na(Docket_Number))) == nrow(arrest)`
+```
+##files
+
+These 2 data files are :  
+
+  1. `Intake Original_All 18 months ready for pivot.xlsm` as `arrest`
+  + ``r nrow(arrest)`` observations
+  + This file contains the arrest counts that JJ derived
+  2. `IntakeActivity 18 month_copy 1.xls` as `intake`
+  + ``r nrow(intake)`` observations
+  + Because `nrow(intake %>% filter(is.na(Docket_Number))) == nrow(arrest)` is `r nrow(intake %>% filter(is.na(Docket_Number))) == nrow(arrest)` we can assume that the arrests counted by JJ are the intakes without at `Docket_Number`  
+  + Screenshot of `iJes` configuration:`![IJES Intake Activity Export](/juvenile-justice/private/IJES Intake Activitiy Export.png)`
+
+##project goals and file contents
+The primary goal of this analysis is to visualize `Juvenile's Home Zip` by `number of arrests` and number of Juveniles within a Zip that have had arrest recidivism.  The categories of recidivism are to be determined by the Juvenile Justice Taskforce, but will most likely be something like `|1 arrest|` `|2 arrests|` `|3 or more arrests|` 
+
+The unique identifier for each client is contained in the variable `Client_ID`.
+
+##vignettes
+In meeting with CYPB, it was determined that `number of arrests` is a bit of a misnomer, as it is really more representative of ~`number of intakes` i.e. some juveniles have more than one intake per arrest and therefore `number of arrests` is likely an estimate that is biased away from zero.  Because JJ has better firsthand knowledge of the data vignettes, they derived the arrest count as `Number_of_arrests` in the ```arrest``` data file. 
+
+The `Juvenile's Home Zip` for each `Cliend_ID` may be different for each row of this data frame. CYPB indicated that this is due to juveniles moving or having more than one home.  For the rough draft of this analysis it was determined that the most recent `Juvenile's Home Zip` would be used.  We acknowledged that this decision was itself a variable.   
+
+Due to time constraints on this project, I will clean the `Juvenile's Home Zip` and `B of I Number` and then start primary analysis - rather than cleaning the entire file before starting primary analysis.  If I am able to create a draft by the given deadline of 201.07.29, I will look to clean the entire file. 
+
+#matching for file inconsistencies
+
+The number of observations in `arrest` (`r nrow(arrest)`) is equal to the number of observations in `intake` without a `Docket_Number` (`r nrow(intake %>% filter(is.na(Docket_Number)))`).  This is unlikely a coincidence.  That being said, there are differneces in the two data frames.  In the chunk below, we will explore these differences and identify whether or not there is a practical, *reproducible* way of deriving `arrest %>% group_by(`Last Name, First Name`) %>% summarize(`Number of arrests`)`
+
+```{r, matching for file inconsistencies}
+library(magrittr)
+library(dplyr)
+library(stringr)
+#kable(arrest %>% 
+#  group_by(`Last Name, First Name`, `Number of arrests`) %>% 
+#  summarize(count = n_distinct(`Number of arrests`)) %>% 
+#  select(-`count`)
+#)
+
+intake <- intake %>% 
+  mutate(`Last Name, First Name` = str_replace(Name," ", ", "))
+
+#kable(intake %>% 
+#       filter(is.na(Docket_Number)==TRUE) %>% 
+#       group_by(`Last Name, First Name`) %>% 
+#       summarize(`Number of arrests` = n()))
+
+join.intake <- intake %>% 
+  group_by(`Last Name, First Name`) %>% 
+  summarize(`Number of intakes` = n())
+
+join.intake.nd <- intake %>% 
+  filter(is.na(Docket_Number==TRUE)) %>% 
+  group_by(`Last Name, First Name`) %>% 
+  summarize(`Number of intakes nd` = n()) 
+
+join.arrest <- arrest %>% 
+  group_by(`Last Name, First Name`, `Number of arrests`) %>% 
+  summarize(count = n_distinct(`Number of arrests`)) %>% 
+  select(-`count`)
+
+intake.arrest <- dplyr::full_join(join.arrest, join.intake, join.intake.nd, by = "Last Name, First Name") %>% 
+  full_join(join.intake.nd, by = "Last Name, First Name")
+
+n.arrest.only <- nrow(intake.arrest %>% filter(is.na(`Number of arrests`)==FALSE, is.na(`Number of intakes`)==TRUE))
+n.intake.only <- nrow(intake.arrest %>% filter(is.na(`Number of arrests`)==TRUE, is.na(`Number of intakes`)==FALSE))
+n.intake.arrest <- nrow(intake.arrest %>% filter(is.na(`Number of arrests`)==FALSE, is.na(`Number of intakes`)==FALSE))
+```
+
+We can see from the above analysis that the `intake` and `arrest` data sets cannot be derived from one another.  The data sets have a cobnined total of `r nrow(intake.arrest)` unique juvenile names - `r n.intake.arrest` are contained in both data sets, `r n.intake.only` are only contained in the intake data set and `r n.arrest.only` are only contained in the arrest data set. 
+
+##Arrest counts
+
+Because we have found that we cannot independently derive the arrest counts from the `intake` data set, we will proceed by using the counts contained in the pre-processed `arrest` data set.
+
+```{r, Arrest counts, comment=FALSE, message=FALSE}
+
+library(magrittr)
+library(dplyr)
+
+arrest <- arrest %>%
+  mutate(`B of I Number` = str_replace(`B of I Number`,"`",""))
+
+unique.j.date.time <- arrest %>% 
+  group_by(`Last Name, First Name`, `Intake Date`, `Intake Time (AM or PM)`) %>% 
+  summarize(`Number of Last-First Date-Time Combinations`=n())
+
+print(unique.j.date.time %>% filter(`Number of Last-First Date-Time Combinations`>1))
+
+unique.j.dob <- arrest %>%
+  group_by(`Last Name, First Name`) %>% 
+  summarize(`Number of DOB per Last-First`= n_distinct(DOB)) %>% 
+  filter(`Number of DOB per Last-First`>1) %>% 
+  arrange(desc(`Number of DOB per Last-First`))
+ 
+write.xlsx(unique.j.dob, file="private/bugs-communication/Last-First with Multiple DOB.xlsx")
+```
+
+##cleaning juveniles by zip
+```{r, clean, comment=FALSE, message=FALSE}
+
+#in review of above bugs, it was determined that 
+
+arrest <- arrest %>%
+  mutate(`Last Name, First Name` = if_else(`B of I Number`=="J150451", str_c(`Last Name, First Name`, "2",sep=""), `Last Name, First Name`)
+  ) %>% 
+  mutate(`Number of arrests` = if_else(`B of I Number` %in% c("J150451","J151694"), 1, `Number of arrests` ))
+
+
+j.zip.distinct <- arrest %>%
+  group_by(`Last Name, First Name`) %>% 
+  summarize(`Number of Home Zips per Juvenile` = n_distinct(`Juvenile's Home Zip`))
+
+counts.by.j.zip.distinct <- j.zip.distinct %>%
+  group_by(`Number of Home Zips per Juvenile`) %>% 
+  summarize(`Number of Juveniles` =n()) %>% 
+  mutate(Percent=scales::percent(round((`Number of Juveniles`/sum(`Number of Juveniles`)),digits=3)))
+```
+The following table represents the number of `Juvenile's Home Zip`'s per`Last Name, First Name` contained in this data file `r knitr::kable(counts.by.j.zip.distinct)`
+
+We'll look at most recent zip for the purpose of the first draft.  Because we are not cleaning the entire file, we will simply extract the `Juvenile's Home Zip`, `B of I Number`, `Intake Date`, and `Intake Time` variables with the `select()` function
+
+#zips needed
+
+In doing this project, I learned that Zip Codes are not actually polygons - they are *lines* derived from US Postal Service routes.  Therefore Zip Code Tabulation Areas (ZCTA) are used for mapping/representing population data.  Apparently ZCTA's can't be extracted from the census bureau api by city/state - so I've got to pull them for all "r format(n.distinct.zip[[1]],big.mark=",")" zip in the whole US and then filter out those that either:
+  
+  * Intersect with the NO shapefile
+  * Match the zip of a juvenile with a record in our data frame
+  
+We will now derive a list of all possible zips 
+```{r, recent zip}
+
+arrest.nola <- left_join(arrest,nola.zips,by=c("Juvenile's Home Zip"="zcta5ce10"))
+
+
+#most important part of the whole analysis - needs editing....
+
+arrest.zip.count <- arrest.nola %>% 
+  group_by(`Last Name, First Name`, `Juvenile's Home Zip`) %>%
+  summarize(lf.zip.count = n()) %>% 
+  arrange(`Last Name, First Name`, desc(lf.zip.count))
+
+
+
+single.zip<- left_join(arrest.nola, arrest.zip.count, by=c("Last Name, First Name", "Juvenile's Home Zip"))
+single.zip <- single.zip %>% 
+  group_by(`Last Name, First Name`) %>% 
+  arrange(desc(lf.zip.count),desc(`Intake Date`)) %>% 
+  slice(1) %>% 
+  mutate(frequentGEOID = as.numeric(`Juvenile's Home Zip`)) %>% 
+  select(`Last Name, First Name`, frequentGEOID)
+
+
+arrest.nola.single.zip <- left_join(arrest.nola, single.zip, by="Last Name, First Name")
+
+zip.count <- arrest.nola.single.zip %>%
+  filter(`Number of arrests`>=1) %>% 
+  group_by(frequentGEOID) %>% 
+  summarize(juvenileCount=n()) %>% 
+  mutate(GEOID = as.character(frequentGEOID))
+
+zip.count.0 <- arrest.nola.single.zip %>%
+  filter(`Number of arrests`>=1) %>% 
+  group_by(frequentGEOID) %>% 
+  summarize(juvenileCount0=n_distinct(`Last Name, First Name`)) %>% 
+  mutate(GEOID = as.character(frequentGEOID))
+
+zip.count.1 <- arrest.nola.single.zip %>%
+  filter(`Number of arrests`==1) %>% 
+  group_by(frequentGEOID) %>% 
+  summarize(juvenileCount1=n_distinct(`Last Name, First Name`)) %>% 
+  mutate(GEOID = as.character(frequentGEOID))  
+ 
+zip.count.2 <- arrest.nola.single.zip %>%
+  filter(`Number of arrests`==2) %>%
+  group_by(frequentGEOID) %>%
+  summarize(juvenileCount2=n_distinct(`Last Name, First Name`)) %>%
+  mutate(GEOID = as.character(frequentGEOID))
+
+zip.count.3 <- arrest.nola.single.zip %>%
+  filter(`Number of arrests`>=3) %>%
+  group_by(frequentGEOID) %>%
+  summarize(juvenileCount3=n_distinct(`Last Name, First Name`)) %>%
+  mutate(GEOID = as.character(frequentGEOID))
+
+zip.count <- zip.count %>%
+  left_join(zip.count.0, by=c("frequentGEOID", "GEOID"))%>% 
+  left_join(zip.count.1, by=c("frequentGEOID", "GEOID"))%>% 
+  left_join(zip.count.2, by=c("frequentGEOID", "GEOID"))%>% 
+  left_join(zip.count.3, by=c("frequentGEOID", "GEOID"))
+```
