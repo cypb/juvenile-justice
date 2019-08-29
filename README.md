@@ -1,7 +1,7 @@
 ## CYPB Juvenile Justice Map
 
 ## Live links
-- Leaflet Map https://chadNoliver.github.io/juvenile-justice/
+- Leaflet Map https://cypb.github.io/juvenile-justice/
 - Google Sheet https://docs.google.com/spreadsheets/d/1vTcQ-7rOu0EvK_EajAfZd7FTHQgHvwOuiYUATISMfLs/edit#gid=0
 
 ## Credits (and licenses)
